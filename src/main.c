@@ -1,149 +1,224 @@
-#include <genesis.h>
-#include "resources.h"
+#include <genesis.h>   // Incluye las definiciones y funciones de la librería SGDK
+#include "resources.h" // Incluye recursos externos, como gráficos y paletas
 
-#define TOTAL_LINES 210 
-#define LAND_LINES TOTAL_LINES - FAR
-#define FAR 80 
+// Definiciones de constantes para el juego
+#define TOTAL_LINES 210
+#define FAR_N 80
+#define LAND_LINES TOTAL_LINES - FAR_N
 #define WAVE_LINES 90
 #define LAND_LIMIT 218
+#define MAX_BULLETS 10 // Número máximo de balas en pantalla
+#define BULLET_SPEED 4 // Velocidad de las balas
+#define BULLET_LIFETIME 180 // 3 segundos a 60 FPS
+#define BULLET_COOLDOWN 20 // Número de frames entre disparos
 
-Sprite* player;
-s16 player_spd_x;
-s16 player_spd_y;
-s16 player_x;
-s16 player_y;
+// Variables para controlar el sprite del jugador
+Sprite *player;
+s16 player_spd_x; // Velocidad horizontal del jugador
+s16 player_spd_y; // Velocidad vertical del jugador
+s16 player_x;     // Posición horizontal del jugador
+s16 player_y;     // Posición vertical del jugador
+
+Sprite *bullets[MAX_BULLETS];    // Arreglo de sprites para las balas
+bool bullet_active[MAX_BULLETS]; // Estado activo de cada bala
+int bullet_lifetime[MAX_BULLETS]; // Tiempo de vida de cada bala
+int bullet_cooldown = 0;          // Cooldown para disparar balas
 
 
-#define SPEED	2
+#define SPEED 2 // Velocidad constante del jugador
 
-
-
-// Functions
+// Declaración de funciones estáticas para manejo de entradas y físicas
 static void updateInput();
 static void updatePhysics();
+static void updateBullets();
+static void fireBullet();
 
-int main(bool hard) {
+int main(bool hard)
+{
+  // Configuración inicial de la pantalla y paleta de colores
+  VDP_setBackgroundColor(0); // Establece el color de fondo
+  VDP_setScreenWidth320();   // Establece la resolución de pantalla a 320 píxeles de ancho
 
-  //////////////////////////////////////////////////////////////
-  // setup screen and palettes
-  VDP_setBackgroundColor(16);
-  VDP_setScreenWidth320();
+  // Configura las paletas de colores para el fondo y el sprite del jugador
+  PAL_setPalette(PAL0, bg_pal.data, CPU);
+  PAL_setPalette(PAL1, m_pal.data, CPU);
+  PAL_setPalette(PAL2, b_pal.data, CPU);
 
-  PAL_setPalette( PAL0, bg_pal.data, CPU );
-  PAL_setPalette( PAL1, m_pal.data, CPU );
-
-  //////////////////////////////////////////////////////////////
-  // setup scrolling
+  // Configuración inicial de los tiles para el fondo
   int ind = TILE_USER_INDEX;
   VDP_drawImageEx(BG_B, &bg, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, ind), 0, 0, FALSE, TRUE);
   ind += bg.tileset->numTile;
 
-  // use LINE scroll for horizontal 
-  VDP_setScrollingMode( HSCROLL_LINE, VSCROLL_PLANE);
+  // Establece el modo de desplazamiento del fondo
+  VDP_setScrollingMode(HSCROLL_LINE, VSCROLL_PLANE);
 
-  s16 hScroll[TOTAL_LINES]; 
-  memset( hScroll, 0, sizeof(hScroll));
+  // Prepara un array para el desplazamiento horizontal con efecto de onda
+  s16 hScroll[TOTAL_LINES];
+  memset(hScroll, 0, sizeof(hScroll)); // Inicializa el array con ceros
 
-  u16 sinPerLine = 4;    // Elements to jump in sin() per line. Larger values give us faster waves.
-  fix16 amplitude = FIX16( 16.0 );  // Amplitude sets how big the waves are.
-  s16 offset = -40;  // shift left a bit.
-  for( u16 i = 0; i < TOTAL_LINES; ++i ) {
-    hScroll[i] = fix16ToInt( fix16Mul(  sinFix16(i * sinPerLine ), amplitude ) ) + offset;
+  // Configura el efecto de onda para el desplazamiento del fondo
+  u16 sinPerLine = 4;
+  fix16 amplitude = FIX16(16.0);
+  s16 offset = -40;
+
+  // Calcula el desplazamiento horizontal por línea para simular ondas
+  for (u16 i = 0; i < TOTAL_LINES; ++i)
+  {
+    hScroll[i] = fix16ToInt(fix16Mul(sinFix16(i * sinPerLine), amplitude)) + offset;
   }
 
-
+  // Configura el desplazamiento del "suelo" para simular perspectiva
   fix16 landOffsets[LAND_LINES];
-  memset( landOffsets, 0, sizeof(landOffsets));
+  memset(landOffsets, 0, sizeof(landOffsets));
 
+  // Inicialización del sistema de sprites
   SPR_init();
 
-  player = SPR_addSprite(&mermaid,100,100,TILE_ATTR(PAL1,0, FALSE,FALSE));
-  Sprite* SPR_addSprite(const SpriteDefinition * 	spriteDef, s16 x, s16 y, u16 attribute);
+  // Añade el sprite del jugador a la pantalla
+  player = SPR_addSprite(&mermaid, 100, 100, TILE_ATTR(PAL1, 0, FALSE, FALSE));
 
-  //////////////////////////////////////////////////////////////
-  // main loop.
-  u16 sinOffset = 0; // Step basically tells us where we're starting in the sin table.
-  while(TRUE)
+  // Inicializa las balas y su estado
+  for (int i = 0; i < MAX_BULLETS; i++)
   {
-    // read joypad to set sinewave parameters 
+    bullets[i] = SPR_addSprite(&bala, -32, -10, TILE_ATTR(PAL2, 0, FALSE, FALSE));
+    bullet_active[i] = FALSE;
+  }
+
+  // Bucle principal del juego
+  fix16 backgroundOffset = FIX16(0); // Desplazamiento constante del fondo
+  fix16 speed_background = FIX16(-0.2);
+  u16 sinOffset = 0; // Desplazamiento ondulatorio que cambia en cada frame
+  while (TRUE)
+  {
     updateInput();
     updatePhysics();
+    updateBullets();
 
-    // write params to the screen.
-    char message[40];
-    char amps[5];
-    fix16ToStr( amplitude, amps, 1 );
-    strclr(message);
-    sprintf( message, "sin per line: %d amplitude: %s  ", sinPerLine, amps );
-    //DP_drawText(message, 3, 1 );
+    if (bullet_cooldown > 0) bullet_cooldown--;
 
-    //////////////////////////////////////////////////////////////
-    // This is what matters right here:  
-    //    calculate the offsets per line using SGDK's sin table
-    //    and adjust with params
-    sinOffset++; // move up in the sine table
-    for( u16 i = 0; i < WAVE_LINES; ++i ) {
-        // compute horizontal offsets with sine table.
-        hScroll[i] = fix16ToInt( fix16Mul(  sinFix16(( i + sinOffset ) * sinPerLine ), amplitude ) ) + offset;
+    backgroundOffset = fix16Add(backgroundOffset, speed_background);
+
+    // Actualización del desplazamiento de onda con una fase variable
+    sinOffset++;
+    for (u16 i = 0; i < TOTAL_LINES; ++i) // Ahora aplicamos la onda a todas las líneas
+    {
+      s16 waveEffect = fix16ToInt(fix16Mul(sinFix16((i + sinOffset) * sinPerLine), amplitude));
+      hScroll[i] = waveEffect + offset + fix16ToInt(backgroundOffset);
     }
 
-    // scroll the land.  
-    
+    // Si deseas mantener el desplazamiento específico para el "suelo" también
     fix16 delta = FIX16(0.05);
-    fix16 offset = FIX16(0.05);
-    for (u16 i = FAR; i < LAND_LIMIT; i ++) {
-      // increase the amount we scroll as we get closer to the bottom of the screen.
-      offset = fix16Add( offset, delta);
-      landOffsets[i-FAR] = fix16Sub( landOffsets[i-FAR], offset);
-      hScroll[i] = fix16ToInt(landOffsets[i-FAR]);
+    fix16 landOffset = FIX16(0.05); // Comienza con un pequeño desplazamiento
+    for (u16 i = FAR_N; i < LAND_LIMIT; i++)
+    {
+      landOffset = fix16Add(landOffset, delta);
+      landOffsets[i - FAR_N] = fix16Sub(landOffsets[i - FAR_N], landOffset);
+      hScroll[i] = fix16ToInt(landOffsets[i - FAR_N]) + offset + fix16ToInt(backgroundOffset);
     }
-    
-    // apply scrolling offsets 
-    VDP_setHorizontalScrollLine (BG_B, 0, hScroll, 223, DMA_QUEUE);
+
+    VDP_setHorizontalScrollLine(BG_B, 0, hScroll, TOTAL_LINES, DMA_QUEUE);
     SYS_doVBlankProcess();
-    
     SPR_update();
   }
   return 0;
-
 }
 
+
+static void fireBullet()
+{
+  if (bullet_cooldown > 0) return; // No hacer nada si el enfriamiento no ha terminado
+
+  for (int i = 0; i < MAX_BULLETS; i++)
+  {
+    if (!bullet_active[i])
+    {
+      bullet_active[i] = TRUE;
+      bullet_lifetime[i] = BULLET_LIFETIME;
+      SPR_setPosition(bullets[i], player_x + 54, player_y); // Ajusta la posición de inicio según necesites
+      bullet_cooldown = BULLET_COOLDOWN; // Reinicia el contador de enfriamiento
+      break;
+    }
+  }
+}
+
+// Función para actualizar la posición de las balas
+static void SPR_getPosition(Sprite *sprite, s16 *x, s16 *y)
+{
+  *x = SPR_getPositionX(sprite);
+  *y = SPR_getPositionY(sprite);
+}
+
+
+static void updateBullets()
+{
+  for (int i = 0; i < MAX_BULLETS; i++)
+  {
+    if (bullet_active[i])
+    {
+      s16 x, y;
+      SPR_getPosition(bullets[i], &x, &y);
+      x += BULLET_SPEED;
+      if (x > 320)
+      { // Asumiendo una resolución de 320 de ancho
+        bullet_active[i] = FALSE;
+        SPR_setPosition(bullets[i], -32, -10); // Mueve la bala fuera de la pantalla
+      }
+      else
+      {
+        SPR_setPosition(bullets[i], x, y);
+      }
+    }
+  }
+}
+
+// Función para leer y procesar la entrada del jugador
 static void updateInput()
 {
-	// Joypad Value
-	u16 value = JOY_readJoypad(JOY_1);
+  // Lee el estado actual del control
+  u16 value = JOY_readJoypad(JOY_1);
 
-	// Move Left/Right
-	if(value & BUTTON_LEFT){ player_spd_x = -SPEED; }
-	else if(value & BUTTON_RIGHT){ player_spd_x = SPEED; }
-	else{ player_spd_x = 0; }
+  // Controla la dirección horizontal del jugador
+  if (value & BUTTON_LEFT)
+  {
+    player_spd_x = -SPEED;
+  }
+  else if (value & BUTTON_RIGHT)
+  {
+    player_spd_x = SPEED;
+  }
+  else
+  {
+    player_spd_x = 0;
+  }
 
-	// Move Up/Down
-	if(value & BUTTON_UP){ player_spd_y = -SPEED; }
-	else if(value & BUTTON_DOWN){ player_spd_y = SPEED; }
-	else{ player_spd_y = 0; }
+  // Controla la dirección vertical del jugador
+  if (value & BUTTON_UP)
+  {
+    player_spd_y = -SPEED;
+  }
+  else if (value & BUTTON_DOWN)
+  {
+    player_spd_y = SPEED;
+  }
+  else
+  {
+    player_spd_y = 0;
+  }
 
-
-  /*
-    if( joypad & BUTTON_A) {
-      sinPerLine = 5;    
-      amplitude = FIX16( 10.0 );
-    } 
-    if( joypad & BUTTON_B) {
-      sinPerLine = 10;    
-      amplitude = FIX16( 30.0 );
-    } 
-    if( joypad & BUTTON_C) {
-      sinPerLine = 80;     
-      amplitude = FIX16( 0.5 );
-    } */
+  // Dispara un proyectil si el botón A está presionado
+  if (value & BUTTON_A)
+  {
+    fireBullet();
+  }
 }
 
+// Función para actualizar la física del jugador
 static void updatePhysics()
 {
-
-  player_y += player_spd_y; 
+  // Actualiza la posición del jugador basándose en su velocidad
+  player_y += player_spd_y;
   player_x += player_spd_x;
 
+  // Establece la nueva posición del sprite del jugador
   SPR_setPosition(player, player_x, player_y);
 }
