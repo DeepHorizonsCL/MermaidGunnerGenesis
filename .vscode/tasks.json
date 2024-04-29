@@ -1,6 +1,4 @@
 {
-    // See https://go.microsoft.com/fwlink/?LinkId=733558
-    // for the documentation about the tasks.json format
     "version": "2.0.0",
     "command": "cmd",
     "type": "shell",
@@ -25,6 +23,35 @@
             "problemMatcher": []
         },
         {
+            "group": "build",
+            "label": "makeandopen",
+            "command": "${env:GDK}\\bin\\make",
+            "args": [
+                "-f",
+                "${env:GDK}\\makefile.gen"
+            ],
+            "dependsOn": "make", // Ensure 'make' task is completed before executing 'makeandopen'
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            },
+            "problemMatcher": [],
+            "windows": {
+                "command": "start",
+                "args": [
+                    //"blastem",
+                    "E:\\MermaidGunnerGenesis\\out\\rom.bin"
+                ],
+                "options": {
+                    "cwd": "E:\\MermaidGunnerGenesis\\out"
+                }
+            }
+        },
+        {
             "label": "clean",
             "command": "${env:GDK}\\bin\\make",
             "args": [
@@ -44,3 +71,4 @@
         }
     ]
 }
+
