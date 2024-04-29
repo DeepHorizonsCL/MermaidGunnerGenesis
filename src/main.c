@@ -134,7 +134,7 @@ static void fireBullet()
     {
       bullet_active[i] = TRUE;
       bullet_lifetime[i] = BULLET_LIFETIME;
-      SPR_setPosition(bullets[i], player_x + 54, player_y); // Ajusta la posición de inicio según necesites
+      SPR_setPosition(bullets[i], player_x + 54, player_y + 5); // Ajusta la posición de inicio según necesites
       bullet_cooldown = BULLET_COOLDOWN; // Reinicia el contador de enfriamiento
       break;
     }
